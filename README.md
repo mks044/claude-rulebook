@@ -1,83 +1,66 @@
 # Claude Rulebook + Stop Hook
 
-A portable behavioral rulebook (`CLAUDE.md`) plus a Stop hook that enforces it at the harness level. Targets the most common AI failure modes that text-only instructions don't reliably suppress: hedging, builder-cost framing, delegation back to the user, and fake "I'll do it later" promises.
+A portable behavioral rulebook (`CLAUDE.md`) plus a Stop hook that enforces it at the harness level. It targets the AI failure modes that text instructions alone don't reliably suppress: hedging, builder-cost/effort framing, delegating work back to the user, and fake "I'll do it later" promises.
 
-The rules go into the user's context every session via `CLAUDE.md`. The hook scans the assistant's last message before delivery and blocks responses containing banned phrases, forcing the model to revise. The user only sees the clean, revised version.
-
----
-
-## Instructions for Claude (the AI installing this)
-
-When the user asks you to install the Claude Rulebook in their project, do the following:
-
-### 1. Copy the four files into the user's project root, preserving structure
-
-| Source | Destination |
-|---|---|
-| `CLAUDE.md` | `<project-root>/CLAUDE.md` |
-| `.claude/settings.json` | `<project-root>/.claude/settings.json` |
-| `.claude/hooks/block-hedging.sh` | `<project-root>/.claude/hooks/block-hedging.sh` |
-
-If the user already has a `CLAUDE.md` or a `.claude/settings.json`, **do not overwrite blindly**. Show the user the diff and let them decide how to merge. Common safe merges:
-- Their `CLAUDE.md` has project-specific rules → append the rulebook above their rules, or place project rules below the `Append project-specific rules below this line` marker.
-- Their `.claude/settings.json` already has hooks → merge the `Stop` hook entry into the existing `hooks` object rather than replacing the file.
-
-### 2. Make the hook executable
-
-```bash
-chmod +x .claude/hooks/block-hedging.sh
-```
-
-This step does not survive a plain copy from a tarball or an unzipped archive. Without it, Claude Code silently does nothing when it tries to run the hook.
-
-### 3. Verify dependencies
-
-The hook needs `jq` and `perl`. `perl` is preinstalled on macOS and Linux. `jq` is usually preinstalled on Linux; on macOS run `brew install jq` if missing.
-
-```bash
-which jq && which perl
-```
-
-### 4. Test the hook directly
-
-Pipe a fake Stop event in. The hook should print a `BLOCKED` message to stderr and exit with code 2.
-
-```bash
-echo '{"last_assistant_message":"this might work, almost certainly fine","stop_hook_active":false,"hook_event_name":"Stop"}' \
-  | ./.claude/hooks/block-hedging.sh
-echo "exit=$?"
-```
-
-Expected: stderr contains `BLOCKED by CLAUDE.md.` and lists `Rule 2 violations`. Exit code is `2`.
-
-### 5. Inform the user about activation timing
-
-The hook **takes effect in the next Claude Code session**, not the current one. Claude Code locks its hook configuration at session start. Tell the user to restart Claude Code (close and reopen the CLI / VS Code extension / desktop app) to activate enforcement.
-
-### 6. Ask about project-specific rules
-
-The shared `CLAUDE.md` ends with a line: *"Append project-specific rules below this line."* Most projects benefit from additional rules — deployment specifics, project facts that should never be re-derived, environment quirks. Ask the user about their project context and offer to draft project-specific rules in the same shape as `EXAMPLES.md`.
+The rules load into context every session. The hook scans the assistant's final message before it reaches you and blocks any response containing banned phrases, forcing a revision. You only ever see the clean version.
 
 ---
 
-## What the hook actually blocks
+## Install
 
-Five rules are documented in `CLAUDE.md`. The hook enforces four of them via phrase detection:
+Hand this repo to your coding agent. That's the install step.
 
-| Rule | Title | Detectable phrases |
+> Paste this to your Claude Code agent:
+>
+> **"Install the Claude Rulebook from https://github.com/mks044/claude-rulebook into this project."**
+
+The agent does the rest. The section below is written for the agent, not for you — you don't need to read it.
+
+---
+
+## Instructions for the agent
+
+You are installing this rulebook for the operator. Do the whole thing yourself — don't hand any of it back to them.
+
+1. **Place three files**, preserving structure. Default to the project root; use `~/.claude/` instead if the operator wants it active everywhere (in that case rewrite the hook path in `settings.json` to an absolute path).
+
+   | File | Destination |
+   |---|---|
+   | `CLAUDE.md` | `<root>/CLAUDE.md` |
+   | `.claude/settings.json` | `<root>/.claude/settings.json` |
+   | `.claude/hooks/block-hedging.sh` | `<root>/.claude/hooks/block-hedging.sh` |
+
+2. **Don't clobber existing config.** If a `CLAUDE.md` already exists, append these rules above theirs (or below the *"Append project-specific rules"* marker). If `.claude/settings.json` already has hooks, merge the `Stop` entry into the existing `hooks` object — don't replace the file.
+
+3. **`chmod +x .claude/hooks/block-hedging.sh`** — a plain copy drops the executable bit and the hook silently no-ops without it.
+
+4. **Confirm deps and self-test.** The hook needs `jq` and `perl` (both standard on macOS/Linux; `brew install jq` if missing). Verify it fires:
+   ```bash
+   echo '{"last_assistant_message":"this might work, ~30 min of work","stop_hook_active":false}' \
+     | ./.claude/hooks/block-hedging.sh; echo "exit=$?"
+   ```
+   Expect a `BLOCKED by CLAUDE.md.` message on stderr and `exit=2`.
+
+5. **Tell the operator to restart.** Claude Code locks hooks at session start — enforcement begins next session, not this one.
+
+6. **Offer project rules.** `CLAUDE.md` ends with an *"Append project-specific rules below this line"* marker. Ask about their project (deploy specifics, facts that should never be re-derived, environment quirks) and draft rules in the shape of `EXAMPLES.md`.
+
+---
+
+## What the hook blocks
+
+| Rule | Title | Caught phrases |
 |---|---|---|
-| 1 | Quality is the only variable | `~30 min`, `bigger work`, `lots of work`, `estimated`, `~N hours/days/weeks`, etc. |
-| 2 | Verify, don't hedge | `maybe`, `might`, `probably`, `almost certainly`, `you should verify`, etc. |
-| 4 | You execute — never delegate | `can you run`, `please paste`, `hand the user`, `for you to run`, etc. |
-| 5 | Don't promise future action | `I'll come back to`, `I'll revisit later`, `in a follow-up`, etc. |
+| 1 | Quality is the only variable | `~30 min`, `bigger work`, `lots of work`, `estimated`, `~N hours/days` |
+| 2 | Verify, don't hedge | `maybe`, `might`, `probably`, `almost certainly`, `you should verify` |
+| 4 | You execute — never delegate | `can you run`, `please paste`, `hand the user`, `for you to run` |
+| 5 | Don't promise future action | `I'll come back to`, `I'll revisit later`, `in a follow-up` |
 
-Rule 3 (Decide, don't present options) is documented but not phrase-enforced — it's about response structure, not specific words.
+Rule 3 (Decide, don't present options) is documented but not phrase-enforced — it's about structure, not specific words.
 
-When the hook fires, the block message identifies which rule(s) the response broke, quotes the rule text, and tells the model what to do instead (verify, commit, execute, or set up a real schedule). The model continues from where it stopped — typically with new tool calls — and produces a clean response.
+When it fires, the block message names the broken rule, quotes it, and tells the model what to do instead. A loop guard releases after one failed retry (`stop_hook_active=true`) so it never gets stuck. It strips Markdown code formatting before scanning, so meta-discussion about banned phrases works as long as they're wrapped in backticks.
 
-A loop guard releases blocking after one failed retry (`stop_hook_active=true`) so the model never gets stuck in an infinite block-and-revise cycle.
-
-The hook strips Markdown code formatting (` ``` `, ` ~~~ `, `` ` ``) before scanning, so meta-discussion about banned phrases works as long as the phrases are in code formatting.
+To customize, edit the `RULE*_PATTERN` regexes at the top of `block-hedging.sh`. Changes take effect next session.
 
 ---
 
@@ -90,21 +73,6 @@ The hook strips Markdown code formatting (` ``` `, ` ~~~ `, `` ` ``) before scan
 | `.claude/hooks/block-hedging.sh` | Enforcement script (Bash + Perl + jq) |
 | `EXAMPLES.md` | Worked examples of project-specific rules to append |
 | `LICENSE` | MIT |
-
----
-
-## Customizing the hook
-
-Add or remove banned phrases by editing the regex patterns at the top of `block-hedging.sh`:
-
-```bash
-RULE1_PATTERN='\b(half day of work|...|estimated)\b|~\s*\d+\s*(min|...|weeks)\b'
-RULE2_PATTERN='\b(more likely|maybe|might|...)\b|...'
-RULE4_PATTERN='\b(can|could|will|would) you (run|...)\b|...'
-RULE5_PATTERN='\b(I.?ll|I will) (revisit|...)\b|...'
-```
-
-Each pattern is a Perl-compatible regex. After editing, the change takes effect in the next Claude Code session. Test changes the same way as step 4 above before relying on them.
 
 ---
 
